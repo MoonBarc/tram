@@ -1,4 +1,5 @@
-pub enum Token<'a> {
+#[derive(PartialEq, Debug)]
+pub enum Token {
     // keywords
     Let,
     Const,
@@ -7,10 +8,15 @@ pub enum Token<'a> {
     Func,
     Enum,
     Struct,
+    If,
+    Else,
 
     // Literals
-    String(&'a str),
+    String(String),
     Number(f64),
+    True,
+    False,
+    Nil,
 
     // Symbols
     Arrow,
@@ -43,13 +49,14 @@ pub enum Token<'a> {
     Or,
 
     // Misc
-    Identifier(&'a str),
+    Identifier(String),
     LParen,
     RParen,
     LBrace,
     RBrace,
     LBracket,
     RBracket,
+
     Start,
     Eof
 }

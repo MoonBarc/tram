@@ -8,7 +8,9 @@ use crate::{corelib, fe::ast::{AstNode, BinOp, Statement, UnOp, Value}, function
 pub enum RuntimeError {
     NotANumber,
     CannotAdd,
-    NotAFunction
+    NotAFunction,
+    IncorrectNumberOfArgs,
+    NotAString
 }
 
 pub struct LocalStack {
@@ -48,7 +50,7 @@ impl LocalStack {
 
     pub fn pop(&mut self) {
         let pop = self.markers.pop().expect("popped nonexistant scope");
-        for i in (pop .. self.locals.len() - 1).rev() {
+        for i in (pop .. self.locals.len()).rev() {
             self.locals.remove(i);
         }
     }
@@ -70,41 +72,49 @@ impl VM {
     }
 
     pub fn register_stdlib(&mut self) {
-        self.locals.set("print", Value::Function(Rc::new(corelib::print as NativeFunction)));
+        let funcs: [(&'static str, NativeFunction); 2] = [
+            ("print", corelib::print),
+            ("run", corelib::run)
+        ];
+        for func in funcs {
+            self.locals.set(func.0, Value::Function(
+                Rc::new(func.1)
+            ))
+        }
     }
 
-    pub fn execute(&mut self, prog: Vec<Statement>) -> Result<(), RuntimeError> {
-        for stmt in prog.into_iter() {
+    pub fn execute(&mut self, prog: &Vec<Statement>) -> Result<(), RuntimeError> {
+        for stmt in prog {
             match stmt {
-                Statement::Expression(x) => { self.execute_ast(*x)?; }
+                Statement::Expression(x) => { self.execute_ast(x)?; }
             }
         }
         Ok(())
     }
 
-    pub fn execute_ast(&mut self, a: AstNode) -> Result<Value, RuntimeError> {
+    pub fn execute_ast(&mut self, a: &AstNode) -> Result<Value, RuntimeError> {
         Ok(match a {
             AstNode::Call(func, args) => {
-                let func = self.execute_ast(*func)?;
+                let func = self.execute_ast(func)?;
                 let mut vargs = Vec::with_capacity(args.len());
                 for a in args {
                     let computed = self.execute_ast(a)?;
                     vargs.push(computed);
                 }
-                func.func()?.call(self, vargs)
+                func.func()?.call(self, vargs)?
             },
-            AstNode::Value(v) => *v,
+            AstNode::Value(v) => (**v).clone(),
             AstNode::Ident(i) => {
                 self.locals.get(&i)
             },
             AstNode::Assign(n, v) => {
-                let val = self.execute_ast(*v)?;
+                let val = self.execute_ast(v)?;
                 self.locals.set(&n, val);
                 Value::Nil
             },
             AstNode::Binary(op, a, b) => {
-                let a = self.execute_ast(*a)?;
-                let b = self.execute_ast(*b)?;
+                let a = self.execute_ast(a)?;
+                let b = self.execute_ast(b)?;
                 match op {
                     BinOp::Add => {
                         match (a, b) {
@@ -114,9 +124,9 @@ impl VM {
                                 Value::Array(new)
                             },
                             (Value::String(a), Value::String(b)) => {
-                                let mut new = a.clone();
+                                let mut new = (*a).clone();
                                 new.push_str(&b);
-                                Value::String(new)
+                                Value::String(Rc::new(new))
                             }
                             (Value::Number(a), Value::Number(b)) => {
                                 Value::Number(a + b)
@@ -132,22 +142,24 @@ impl VM {
                 }
             },
             AstNode::Unary(op, a) => {
-                let val = self.execute_ast(*a)?;
+                let val = self.execute_ast(a)?;
                 match op {
                     UnOp::Not => Value::Bool(!val.truthy()),
                 }
             },
             AstNode::If { cond, then, or } => {
-                let cond = self.execute_ast(*cond)?;
+                let cond = self.execute_ast(cond)?;
                 if cond.truthy() {
-                    self.execute_ast(*then)?
+                    self.execute_ast(then)?
+                } else if let Some(or) = or {
+                    self.execute_ast(or)?
                 } else {
-                    self.execute_ast(*or)?
+                    Value::Nil
                 }
             },
             AstNode::Block(stmt) => {
                 self.locals.push();
-                self.execute(stmt);
+                self.execute(stmt)?;
                 self.locals.pop();
                 Value::Nil
             }

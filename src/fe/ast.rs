@@ -5,7 +5,7 @@ use crate::{executor::RuntimeError, function::Callable};
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
-    String(String),
+    String(Rc<String>),
     Bool(bool),
     Array(Vec<Self>),
     Function(Rc<dyn Callable>),
@@ -39,6 +39,13 @@ impl Value {
         Ok(match self {
             Self::Function(c) => c.clone(),
             _ => return Err(RuntimeError::NotAFunction)
+        })
+    }
+
+    pub fn string(&self) -> Result<Rc<String>, RuntimeError> {
+        Ok(match self {
+            Self::String(s) => s.clone(),
+            _ => return Err(RuntimeError::NotAString)
         })
     }
 }
@@ -91,7 +98,7 @@ pub enum AstNode {
     If {
         cond: Ast,
         then: Ast,
-        or: Ast
+        or: Option<Ast>
     },
     Block(Vec<Statement>)
 }
