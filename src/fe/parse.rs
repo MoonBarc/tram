@@ -56,7 +56,7 @@ impl Token {
     }
 }
 
-pub fn parse(source: String) -> Vec<Statement> {
+pub fn parse(source: String) -> (Vec<Statement>, Vec<ParseError>) {
     let mut p = Parser::new(source);
     p.parse_all()
 }
@@ -79,7 +79,7 @@ impl Parser {
         }
     }
 
-    pub fn parse_all(&mut self) -> Vec<Statement> {
+    pub fn parse_all(&mut self) -> (Vec<Statement>, Vec<ParseError>) {
         self.block(false)
     }
 
@@ -100,6 +100,8 @@ impl Parser {
             Token::Identifier(..) => self.ident(),
             Token::Func => self.func(true),
             Token::If => self.if_expr(),
+            Token::Loop => self.loop_expr(),
+            Token::Break => Ast::new(AstNode::Break(None)),
             t => panic!("unexpected token, {:?}", t)
         };
         while prec <= self.next.prec() {
@@ -205,10 +207,13 @@ impl Parser {
 
     fn if_expr(&mut self) -> Ast {
         let cond = self.expression();
+        if !self.pick(&Token::LBrace) {
+            panic!("expected `{{` to open then block after if condition")
+        }
         let then = self.block_expr(true);
         let mut or = None;
         if self.pick(&Token::Else) {
-            if self.pick(&Token::RBracket) {
+            if self.pick(&Token::LBrace) {
                 or = Some(self.block_expr(true))
             } else if self.pick(&Token::If) {
                 or = Some(self.if_expr())
@@ -252,12 +257,30 @@ impl Parser {
             Token::Div => BinOp::Div,
             Token::Mod => BinOp::Mod,
             Token::Pow => BinOp::Pow,
+            Token::Eq => BinOp::Eq,
+            Token::Gt => BinOp::Gt,
+            Token::GtEq => BinOp::GtEq,
+            Token::Lt => BinOp::Lt,
+            Token::LtEq => BinOp::LtEq,
+            Token::And => BinOp::And,
+            Token::Or => BinOp::Or,
+
             x => panic!("no binary expression implemented for {:?}", x)
         };
 
         let rhs = self.parse_with_prec(prec);
 
         Ast::new(AstNode::Binary(op, lhs, rhs))
+    }
+
+    fn loop_expr(&mut self) -> Ast {
+        let cond: Option<Ast> = None;
+        let label = None;
+        if !self.pick(&Token::LBrace) {
+            panic!("expected `{{` to open loop, got {:?}", self.next);
+        }
+        let run = self.block_expr(true);
+        Ast::new(AstNode::Loop { cond, run, label })
     }
 
     fn advance(&mut self) {

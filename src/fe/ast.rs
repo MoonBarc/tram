@@ -50,6 +50,19 @@ impl Value {
     }
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Number(l), Self::Number(r)) => l == r,
+            (Self::String(l), Self::String(r)) => l == r,
+            (Self::Bool(l), Self::Bool(r)) => l == r,
+            (Self::Array(l), Self::Array(r)) => l == r,
+            (Self::Function(f1), Self::Function(f2)) => core::ptr::eq(f1.as_ref(), f2.as_ref()),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -58,8 +71,11 @@ impl Display for Value {
             Value::Bool(b) => Display::fmt(b, f)?,
             Value::Array(a) => {
                 write!(f, "[")?;
-                for elem in a {
-                    write!(f, "{}", elem.to_string())?
+                for (i, elem) in a.iter().enumerate() {
+                    write!(f, "{}", elem.to_string())?;
+                    if i != a.len() - 1 {
+                        write!(f, ", ")?;
+                    }
                 }
                 write!(f, "]")?;
             }
@@ -77,7 +93,14 @@ pub enum BinOp {
     Mul,
     Div,
     Pow,
-    Mod
+    Mod,
+    Eq,
+    Gt,
+    GtEq,
+    Lt,
+    LtEq,
+    And,
+    Or
 }
 
 #[derive(Debug)]
@@ -100,7 +123,13 @@ pub enum AstNode {
         then: Ast,
         or: Option<Ast>
     },
-    Block(Vec<Statement>)
+    Block(Vec<Statement>),
+    Loop {
+        label: Option<String>,
+        cond: Option<Ast>,
+        run: Ast
+    },
+    Break(Option<String>)
 }
 
 #[derive(Debug)]

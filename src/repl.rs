@@ -9,7 +9,7 @@ pub fn run(vm: &mut VM) {
         let mut buffer = String::new();
         std::io::stdin().read_line(&mut buffer)
             .expect("failed to read from stdin!");
-        if buffer == "quit" { break }
+        if buffer.trim() == "quit" { break }
         let prog = Parser::new(buffer).parse_all();
         if let Err(e) = vm.execute(&prog) {
             println!("== Runtime error from VM: {:?}", e);

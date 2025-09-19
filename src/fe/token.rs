@@ -10,6 +10,9 @@ pub enum Token {
     Struct,
     If,
     Else,
+    Loop,
+    Break,
+    Continue,
 
     // Literals
     String(String),

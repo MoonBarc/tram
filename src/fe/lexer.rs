@@ -64,10 +64,6 @@ impl Lexer {
         if self.pick('=') { with } else { without }
     }
 
-    fn at_end(&self) -> bool {
-        self.peek() == '\0'
-    }
-
     fn skip_whitespace(&mut self) {
         while self.pick(' ') || self.pick('\t') || self.pick('\n') {}
     }
@@ -152,6 +148,9 @@ impl Lexer {
             "struct" => Struct,
             "if" => If,
             "else" => Else,
+            "loop" => Loop,
+            "break" => Break,
+            "continue" => Continue,
 
             "true" => True,
             "false" => False,

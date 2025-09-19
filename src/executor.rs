@@ -56,25 +56,45 @@ impl LocalStack {
     }
 
     pub fn set(&mut self, name: &str, val: Value) {
-        self.locals.push((name.to_owned(), val))
+        let mut idx: Option<usize> = None;
+        for (i, (lname, _)) in self.locals.iter().enumerate().rev() {
+            if name == lname {
+                idx = Some(i);
+                break;
+            }
+        }
+        if let Some(idx) = idx {
+            self.locals[idx] = (self.locals[idx].0.to_owned(), val);
+        } else {
+            self.locals.push((name.to_owned(), val))
+        }
     }
 }
 
 pub struct VM {
-    pub locals: LocalStack
+    pub locals: LocalStack,
+    exit_flag: ExitFlag
+}
+
+enum ExitFlag {
+    Continue,
+    Exit,
+    Break(Option<String>)
 }
 
 impl VM {
     pub fn new() -> Self {
         Self {
-            locals: LocalStack::new()
+            locals: LocalStack::new(),
+            exit_flag: ExitFlag::Continue
         }
     }
 
     pub fn register_stdlib(&mut self) {
-        let funcs: [(&'static str, NativeFunction); 2] = [
+        let funcs: [(&'static str, NativeFunction); 3] = [
             ("print", corelib::print),
-            ("run", corelib::run)
+            ("run", corelib::run),
+            ("sleep", corelib::sleep)
         ];
         for func in funcs {
             self.locals.set(func.0, Value::Function(
@@ -139,6 +159,13 @@ impl VM {
                     BinOp::Div => a.num_op(&b, |a, b| Ok(a / b))?,
                     BinOp::Pow => a.num_op(&b, |a, b| Ok(a.powf(b)))?,
                     BinOp::Mod => a.num_op(&b, |a, b| Ok(a % b))?,
+                    BinOp::Eq => Value::Bool(a == b),
+                    BinOp::Gt => Value::Bool(a.num()? > b.num()?),
+                    BinOp::GtEq => Value::Bool(a.num()? >= b.num()?),
+                    BinOp::Lt => Value::Bool(a.num()? < b.num()?),
+                    BinOp::LtEq => Value::Bool(a.num()? <= b.num()?),
+                    BinOp::And => Value::Bool(a.truthy() && b.truthy()),
+                    BinOp::Or => Value::Bool(a.truthy() || b.truthy()),
                 }
             },
             AstNode::Unary(op, a) => {
@@ -161,6 +188,33 @@ impl VM {
                 self.locals.push();
                 self.execute(stmt)?;
                 self.locals.pop();
+                Value::Nil
+            },
+            AstNode::Loop { label, cond, run } => {
+                loop {
+                    let mut should_break = false;
+                    if let ExitFlag::Break(elabel) = &self.exit_flag {
+                        if let (Some(l1), Some(l2)) = (label, elabel) {
+                            should_break = l1 == l2 
+                        } else { should_break = true }
+                    }
+                    if should_break {
+                        self.exit_flag = ExitFlag::Continue;
+                        break
+                    }
+                    if let Some(c) = cond {
+                        let v = self.execute_ast(c)?;
+                        if v.truthy() {
+                            self.execute_ast(run)?;
+                        }
+                    } else {
+                        self.execute_ast(run)?;
+                    }
+                }
+                Value::Nil
+            },
+            AstNode::Break(label) => {
+                self.exit_flag = ExitFlag::Break(label.clone());
                 Value::Nil
             }
         })

@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, thread, time::Duration};
 
 use crate::{executor::{RuntimeError, VM}, fe::{ast::Value, parse}};
 
@@ -30,5 +30,15 @@ pub fn run(vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
     vm.execute(&prog)?;
     vm.locals.pop();
 
+    Ok(Value::Nil)
+}
+
+pub fn sleep(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
+    let m = match vals.first() {
+        Some(m) => m,
+        None => return Err(RuntimeError::IncorrectNumberOfArgs)
+    };
+
+    thread::sleep(Duration::from_secs_f64(m.num()?));
     Ok(Value::Nil)
 }
