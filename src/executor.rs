@@ -2,15 +2,16 @@
 
 use std::rc::Rc;
 
-use crate::{corelib, fe::ast::{AstNode, BinOp, Statement, UnOp, Value}, function::NativeFunction};
+use crate::{corelib, fe::ast::{AstNode, BinOp, Statement, UnOp}, function::NativeFunction, handle::Handle, value::Value};
 
 #[derive(Debug)]
 pub enum RuntimeError {
-    NotANumber,
     CannotAdd,
-    NotAFunction,
     IncorrectNumberOfArgs,
-    NotAString
+    NotAFunction,
+    NotANumber,
+    NotAString,
+    NotAMap
 }
 
 pub struct LocalStack {
@@ -91,34 +92,35 @@ impl VM {
     }
 
     pub fn register_stdlib(&mut self) {
-        let funcs: [(&'static str, NativeFunction); 3] = [
+        let funcs: &[(&str, NativeFunction)] = &[
             ("print", corelib::print),
+            ("input", corelib::input),
+            ("type", corelib::corelib_type),
             ("run", corelib::run),
-            ("sleep", corelib::sleep)
+            ("sleep", corelib::sleep),
         ];
-        for func in funcs {
-            self.locals.set(func.0, Value::Function(
-                Rc::new(func.1)
-            ))
+        let funcs = funcs.into_iter()
+            .map(|(n, f)| (*n, Value::Function(Rc::new(*f))));
+
+        let objs = [
+            ("math", corelib::math())
+        ];
+
+        let globals = objs.into_iter()
+            .chain(funcs);
+
+        for (name, global) in globals {
+            self.locals.set(name, global);
         }
     }
 
-    pub fn execute(&mut self, prog: &Vec<Statement>) -> Result<(), RuntimeError> {
-        for stmt in prog {
-            match stmt {
-                Statement::Expression(x) => { self.execute_ast(x)?; }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn execute_ast(&mut self, a: &AstNode) -> Result<Value, RuntimeError> {
+    pub fn execute(&mut self, a: &AstNode) -> Result<Value, RuntimeError> {
         Ok(match a {
             AstNode::Call(func, args) => {
-                let func = self.execute_ast(func)?;
+                let func = self.execute(func)?;
                 let mut vargs = Vec::with_capacity(args.len());
                 for a in args {
-                    let computed = self.execute_ast(a)?;
+                    let computed = self.execute(a)?;
                     vargs.push(computed);
                 }
                 func.func()?.call(self, vargs)?
@@ -128,25 +130,25 @@ impl VM {
                 self.locals.get(&i)
             },
             AstNode::Assign(n, v) => {
-                let val = self.execute_ast(v)?;
+                let val = self.execute(v)?;
                 self.locals.set(&n, val);
                 Value::Nil
             },
             AstNode::Binary(op, a, b) => {
-                let a = self.execute_ast(a)?;
-                let b = self.execute_ast(b)?;
+                let a = self.execute(a)?;
+                let b = self.execute(b)?;
                 match op {
                     BinOp::Add => {
                         match (a, b) {
                             (Value::Array(a), Value::Array(b)) => {
-                                let mut new = a.clone();
-                                new.append(&mut b.clone());
-                                Value::Array(new)
+                                let mut new = a.borrow().clone();
+                                new.append(&mut b.borrow().clone());
+                                Value::Array(Handle::new(new))
                             },
                             (Value::String(a), Value::String(b)) => {
-                                let mut new = (*a).clone();
-                                new.push_str(&b);
-                                Value::String(Rc::new(new))
+                                let mut new = a.borrow().clone();
+                                new.push_str(&b.borrow());
+                                Value::String(Handle::new(new))
                             }
                             (Value::Number(a), Value::Number(b)) => {
                                 Value::Number(a + b)
@@ -166,29 +168,49 @@ impl VM {
                     BinOp::LtEq => Value::Bool(a.num()? <= b.num()?),
                     BinOp::And => Value::Bool(a.truthy() && b.truthy()),
                     BinOp::Or => Value::Bool(a.truthy() || b.truthy()),
+                    BinOp::Access => {
+                        let map = a.map()?;
+                        let map = map.borrow();
+                        match map.get(&b) {
+                            Some(v) => v.clone(),
+                            None => {
+                                Value::Nil
+                            }
+                        }
+                    }
                 }
             },
             AstNode::Unary(op, a) => {
-                let val = self.execute_ast(a)?;
+                let val = self.execute(a)?;
                 match op {
                     UnOp::Not => Value::Bool(!val.truthy()),
+                    UnOp::Sub => Value::Number(-val.num()?)
                 }
             },
             AstNode::If { cond, then, or } => {
-                let cond = self.execute_ast(cond)?;
+                let cond = self.execute(cond)?;
                 if cond.truthy() {
-                    self.execute_ast(then)?
+                    self.execute(then)?
                 } else if let Some(or) = or {
-                    self.execute_ast(or)?
+                    self.execute(or)?
                 } else {
                     Value::Nil
                 }
             },
-            AstNode::Block(stmt) => {
-                self.locals.push();
-                self.execute(stmt)?;
-                self.locals.pop();
-                Value::Nil
+            AstNode::Block(stmts, scoped) => {
+                if *scoped {
+                    self.locals.push();
+                }
+                let mut out = Value::Nil;
+                for stmt in stmts {
+                    match stmt {
+                        Statement::Expression(x) => { out = self.execute(x)?; }
+                    }
+                }
+                if *scoped {
+                    self.locals.pop();
+                }
+                out
             },
             AstNode::Loop { label, cond, run } => {
                 loop {
@@ -203,12 +225,12 @@ impl VM {
                         break
                     }
                     if let Some(c) = cond {
-                        let v = self.execute_ast(c)?;
+                        let v = self.execute(c)?;
                         if v.truthy() {
-                            self.execute_ast(run)?;
+                            self.execute(run)?;
                         }
                     } else {
-                        self.execute_ast(run)?;
+                        self.execute(run)?;
                     }
                 }
                 Value::Nil
@@ -216,6 +238,10 @@ impl VM {
             AstNode::Break(label) => {
                 self.exit_flag = ExitFlag::Break(label.clone());
                 Value::Nil
+            },
+            AstNode::Error => {
+                // this should never happen
+                panic!("running poorly compiled code, encountered Error node.");
             }
         })
     }

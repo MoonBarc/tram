@@ -1,3 +1,5 @@
+use crate::fe::diagnostic::Span;
+
 use super::token::Token;
 
 pub struct Lexer {
@@ -6,9 +8,10 @@ pub struct Lexer {
     source: Vec<char>
 }
 
-// lazy, inefficient lexer that does two passes over the source program
+// lexer that does two passes over the source program
+// could be made more efficient
 impl Lexer {
-    pub fn new(source: String) -> Self {
+    pub fn new(source: &str) -> Self {
         // space at the front
         let chars = [' '].into_iter().chain(source.chars()).collect();
         
@@ -19,12 +22,13 @@ impl Lexer {
         }
     }
 
-    pub fn next(&mut self) -> Token {
-        self.skip_whitespace();
+    pub fn next(&mut self) -> (Token, Span) {
         use Token::*;
+
+        self.skip_whitespace();
         let nxt = self.advance();
         self.tok_start = self.at;
-        match nxt {
+        (match nxt {
             'a'..='z' | 'A'..='Z' | '_' => self.identifier(),
             '0'..='9' => self.number(),
             '-' => if self.pick('>') { Arrow } else { self.eq_or(Sub, SubEq) },
@@ -57,7 +61,7 @@ impl Lexer {
             '"' => self.string(),
 
             n => panic!("unknown character {}", n)
-        }
+        }, Span::new(self.tok_start - 1, self.at))
     }
 
     fn eq_or(&mut self, without: Token, with: Token) -> Token {

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::{executor::{RuntimeError, VM}, fe::ast::{Ast, Value}};
+use crate::{executor::{RuntimeError, VM}, fe::ast::Ast, value::Value};
 
 pub trait Callable: Debug {
     fn call(&self, vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError>;
@@ -35,7 +35,7 @@ impl Callable for Function {
         for p in self.params.iter().enumerate() {
             vm.locals.set(&p.1, vals[p.0].clone())
         }
-        let val = vm.execute_ast(&*self.ast);
+        let val = vm.execute(&*self.ast);
         vm.locals.pop();
         val
     }

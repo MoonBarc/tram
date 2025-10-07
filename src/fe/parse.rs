@@ -1,8 +1,20 @@
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc, str::FromStr};
 
-use crate::{fe::ast::BinOp, function::Function};
+use crate::{fe::{ast::{BinOp, UnOp}, diagnostic::{ParseError, Span}}, function::Function, handle::Handle, value::Value};
 
-use super::{ast::{Ast, AstNode, Statement, Value}, lexer::Lexer, token::Token};
+use super::{ast::{Ast, AstNode, Statement}, lexer::Lexer, token::Token};
+
+impl FromStr for Ast {
+    type Err = Vec<ParseError>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut p = Parser::new(s);
+        let (ast, err) = p.parse_all();
+        if err.is_empty() {
+            Ok(ast)
+        } else { Err(err) }
+    }
+}
 
 macro_rules! precs {
     ($($prec:ident: $num:expr),+) => {
@@ -26,7 +38,8 @@ precs!(
     POW: 8,
     UNARY: 9,
     CALL: 10,
-    PRIMARY: 11
+    DOT: 11,
+    PRIMARY: 12
 );
 
 impl Token {
@@ -42,45 +55,51 @@ impl Token {
             Or => prec::OR,
             Assign | AddEq | SubEq | MulEq | DivEq | PowEq | ModEq => prec::ASSIGN,
             LParen => prec::CALL,
+            Dot => prec::DOT,
             _ => prec::NONE
         }
     }
 
-    pub fn infix(&self) -> Option<fn(&mut Parser, lhs: Ast, prec: u8) -> Ast> {
+    fn infix(&self) -> Option<fn(&mut Parser, lhs: Ast, prec: u8) -> Ast> {
         match self.prec() {
             prec::NONE => None,
             prec::CALL => Some(Parser::call),
+            prec::DOT => Some(Parser::dot_expr),
             prec::ASSIGN => Some(Parser::assign),
             _ => Some(Parser::binary)
         }
     }
 }
 
-pub fn parse(source: String) -> (Vec<Statement>, Vec<ParseError>) {
-    let mut p = Parser::new(source);
-    p.parse_all()
-}
-
 pub struct Parser {
     lexer: Lexer,
     current: Token,
-    next: Token
+    next: Token,
+    next_span: Span,
+    current_span: Span,
+    errors: Vec<ParseError>
 }
 
 impl Parser {
     /// The start of `lexed` must be a `Start` token,
     /// and the end must be an `Eof` token.
-    pub fn new(source: String) -> Self {
+    pub fn new(source: &str) -> Self {
         let mut lexer = Lexer::new(source);
+        let (next, span) = lexer.next();
         Self {
             current: Token::Start,
-            next: lexer.next(),
-            lexer
+            next,
+            errors: vec![],
+            lexer,
+            current_span: Span::empty(),
+            next_span: span
         }
     }
 
-    pub fn parse_all(&mut self) -> (Vec<Statement>, Vec<ParseError>) {
-        self.block(false)
+    pub fn parse_all(&mut self) -> (Ast, Vec<ParseError>) {
+        let block = self.block(false, false);
+        let errors = std::mem::take(&mut self.errors);
+        (block, errors)
     }
 
     pub fn statement(&mut self) -> Statement {
@@ -98,32 +117,48 @@ impl Parser {
             | Token::String(..)
             | Token::True | Token::False | Token::Nil => self.literal(),
             Token::Identifier(..) => self.ident(),
-            Token::Func => self.func(true),
+            Token::Func => self.func(),
             Token::If => self.if_expr(),
             Token::Loop => self.loop_expr(),
+            Token::LBrace => self.block(true, true),
             Token::Break => Ast::new(AstNode::Break(None)),
-            t => panic!("unexpected token, {:?}", t)
+            Token::Not | Token::Sub => self.unary(),
+            t => self.error(format!("unexpected token {:?}", t))
         };
         while prec <= self.next.prec() {
             self.advance();
             node = if let Some(ifix) = self.current.infix() {
                 ifix(self, node, self.current.prec() + 1)
             } else {
-                panic!("{:?} has no infix value!", self.current)
+                return self.error(format!("{:?} has no infix value!", self.current))
             }
         }
         node
     }
 
-    fn expect_ident(&mut self) -> String {
-        match &self.current {
-            Token::Identifier(s) => s.clone(),
-            _ => panic!("expected an identifier")
-        }
+    fn dot_expr(&mut self, lhs: Ast, _prec: u8) -> Ast {
+        let Token::Identifier(i) = &self.next else {
+            return self.error("identifier expected following `.`");
+        };
+        let st = AstNode::Value(Box::new(i.into()));
+        self.advance();
+        
+        Ast::new(AstNode::Binary(
+            BinOp::Access,
+            lhs, 
+            Ast::new(st)
+        ))
+    }
+
+    fn access_expr(&mut self) -> Ast {
+        self.error("access syntax unimplemented")
     }
 
     fn ident(&mut self) -> Ast {
-        Ast::new(AstNode::Ident(self.expect_ident()))
+        let Token::Identifier(s) = &self.current else {
+            return self.error("expected an identifier");
+        };
+        Ast::new(AstNode::Ident(s.clone()))
     }
 
     fn call(&mut self, func: Ast, _prec: u8) -> Ast {
@@ -131,17 +166,28 @@ impl Parser {
         while !self.pick(&Token::RParen) {
             args.push(*self.expression());
             if self.next != Token::RParen {
-                assert_eq!(self.next, Token::Comma);
-                self.advance();
+                if !self.pick(&Token::Comma) {
+                    return self.error("expected comma after expression");
+                }
             }
         }
         Ast::new(AstNode::Call(func, args))
     }
 
+    fn error(&mut self, message: impl Into<Cow<'static, str>>) -> Ast {
+        let m = message.into();
+        let error = ParseError {
+            span: self.current_span,
+            message: m.into()
+        };
+        self.errors.push(error);
+        Ast::new(AstNode::Error)
+    }
+
     fn assign(&mut self, lhs: Ast, prec: u8) -> Ast {
         let name = match &*lhs {
             AstNode::Ident(s) => s.clone(),
-            _ => panic!("invalid assignment target")
+            _ => return self.error("invalid assignment target")
         };
         macro_rules! map {
             ($i:expr, $($token:ident => $binop:ident),*) => {
@@ -169,22 +215,25 @@ impl Parser {
         Ast::new(AstNode::Assign(name, value))
     }
 
-    fn func(&mut self, anon: bool) -> Ast {
-        let mut name = None;
-        if !anon {
-            self.advance();
-            name = match &self.current {
-                Token::Identifier(s) => Some(s.clone()),
-                _ => panic!("expected name of the function")
-            };
-        }
+    fn func(&mut self) -> Ast {
+        let name = match &self.next {
+            Token::Identifier(s) => {
+                let n = s.clone();
+                self.advance();
+                Some(n)
+            }
+            _ => None
+        };
         if !self.pick(&Token::LParen) {
-            panic!("expected `(` to start argument list")
+            return self.error("expected `(` to start argument list")
         }
         let mut args = Vec::new();
         while !self.pick(&Token::RParen) {
             self.advance();
-            args.push(self.expect_ident());
+            let Token::Identifier(id) = &self.current else {
+                return self.error("expected identifier in argument list")
+            };
+            args.push(id.clone());
             if self.next != Token::RParen {
                 assert_eq!(self.next, Token::Comma);
                 self.advance();
@@ -192,35 +241,50 @@ impl Parser {
         }
 
         if !self.pick(&Token::LBrace) {
-            panic!("expected `{{` to open the function block, got: {:?}", self.next);
+            return self.error(
+                format!("expected `{{` to open the function block, got: {:?}", self.next));
         }
-        let ast = self.block_expr(true);
+        let ast = self.block(true, true);
         let func = Function {
-            name,
+            name: name.clone(),
             params: args,
             ast
         };
-        Ast::new(AstNode::Value(Box::new(
+        let fn_value = Ast::new(AstNode::Value(Box::new(
             Value::Function(Rc::new(func))
-        )))
+        )));
+
+        if let Some(name) = name {
+            // func hello() {} ==> hello = func hello() {}
+            let assignment = Statement::Expression(
+                Ast::new(AstNode::Assign(name.clone(), fn_value))
+            );
+            Ast::new(AstNode::Block(
+                vec![
+                    assignment,
+                    Statement::Expression(Ast::new(AstNode::Ident(name)))
+                ], false
+            ))
+        } else {
+            fn_value
+        }
     }
 
     fn if_expr(&mut self) -> Ast {
         let cond = self.expression();
         if !self.pick(&Token::LBrace) {
-            panic!("expected `{{` to open then block after if condition")
+            return self.error("expected `{` to open then block after if condition")
         }
-        let then = self.block_expr(true);
-        let mut or = None;
-        if self.pick(&Token::Else) {
+        let then = self.block(true, true);
+        let or = if self.pick(&Token::Else) {
             if self.pick(&Token::LBrace) {
-                or = Some(self.block_expr(true))
+                Some(self.block(true, true))
             } else if self.pick(&Token::If) {
-                or = Some(self.if_expr())
+                Some(self.if_expr())
             } else {
-                panic!("expected block or if expression after `else`")
+                Some(self.error("expected block or if expression after `else`"))
             }
-        }
+        } else { None };
         Ast::new(AstNode::If {
             cond,
             then,
@@ -228,25 +292,21 @@ impl Parser {
         })
     }
 
-    fn block_expr(&mut self, expect_end: bool) -> Ast {
-        Ast::new(AstNode::Block(self.block(expect_end)))
-    }
-
-    fn block(&mut self, expect_end: bool) -> Vec<Statement> {
+    fn block(&mut self, expect_end: bool, scoped: bool) -> Ast {
         let mut v = Vec::new();
         loop {
             if expect_end && self.pick(&Token::RBrace) {
                 break;
             } else if self.pick(&Token::Eof) {
                 if expect_end {
-                    panic!("expected closing `}}`")
+                    return self.error("expected closing `}`")
                 } else {
                     break
                 }
             }
             v.push(self.statement());
         }
-        v
+        Ast::new(AstNode::Block(v, scoped))
     }
 
     fn binary(&mut self, lhs: Ast, prec: u8) -> Ast {
@@ -265,7 +325,7 @@ impl Parser {
             Token::And => BinOp::And,
             Token::Or => BinOp::Or,
 
-            x => panic!("no binary expression implemented for {:?}", x)
+            x => return self.error(format!("no binary expression implemented for {:?}", x))
         };
 
         let rhs = self.parse_with_prec(prec);
@@ -273,19 +333,33 @@ impl Parser {
         Ast::new(AstNode::Binary(op, lhs, rhs))
     }
 
+    fn unary(&mut self) -> Ast {
+        let op = match &self.current {
+            Token::Not => UnOp::Not,
+            Token::Sub => UnOp::Sub,
+
+            x => return self.error(format!("no unary expression implemented for {:?}", x))
+        };
+        let expr = self.expression();
+
+        Ast::new(AstNode::Unary(op, expr))
+    }
+
     fn loop_expr(&mut self) -> Ast {
         let cond: Option<Ast> = None;
         let label = None;
         if !self.pick(&Token::LBrace) {
-            panic!("expected `{{` to open loop, got {:?}", self.next);
+            self.error(format!("expected `{{` to open loop, got {:?}", self.next));
         }
-        let run = self.block_expr(true);
+        let run = self.block(true, true);
         Ast::new(AstNode::Loop { cond, run, label })
     }
 
     fn advance(&mut self) {
-        let next = self.lexer.next();
+        let (next, span) = self.lexer.next();
         std::mem::swap(&mut self.current, &mut self.next);
+        std::mem::swap(&mut self.current_span, &mut self.next_span);
+        self.next_span = span;
         self.next = next;
     }
 
@@ -299,7 +373,7 @@ impl Parser {
     fn literal(&mut self) -> Ast {
         Ast::new(AstNode::Value(Box::new(match &self.current {
             Token::Number(n) => Value::Number(*n),
-            Token::String(s) => Value::String(Rc::new(s.clone())),
+            Token::String(s) => Value::String(Handle::new(s.clone())),
             Token::True => Value::Bool(true),
             Token::False => Value::Bool(false),
             Token::Nil => Value::Nil,

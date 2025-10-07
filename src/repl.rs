@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{executor::VM, fe::parse::Parser};
+use crate::{executor::VM, fe::ast::Ast};
 
 pub fn run(vm: &mut VM) {
     loop {
@@ -9,11 +9,26 @@ pub fn run(vm: &mut VM) {
         let mut buffer = String::new();
         std::io::stdin().read_line(&mut buffer)
             .expect("failed to read from stdin!");
+        if buffer == "" {
+            // no return must mean EOF
+            break
+        }
         if buffer.trim() == "quit" { break }
-        let prog = Parser::new(buffer).parse_all();
-        if let Err(e) = vm.execute(&prog) {
-            println!("== Runtime error from VM: {:?}", e);
+        let prog: Ast = match buffer.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                for err in e {
+                    err.log(Some(&buffer));
+                }
+                continue
+            }
+        };
+        match vm.execute(&prog) {
+            Err(e) => println!("== Runtime error from VM: {:?}", e),
+            Ok(v) => {
+                println!("{:?}", v)
+            }
         }
     }
-    println!("kthxbye!")
+    println!("\nkthxbye!")
 }
