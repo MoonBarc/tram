@@ -1,0 +1,89 @@
+print("\n\n  # welcome to madlibs! #")
+
+name = prompt("please enter your name: ")
+print("hi " + name + "! are you ready to start?")
+
+not_ready_counter = 0
+
+loop {
+    response = prompt("(enter 'yes' if ready)> ")
+    if response == "yes" {
+        print("yay!")
+        break
+    } else {
+        not_ready_counter += 1
+        if not_ready_counter >= 3 {
+            print("okay, FINE.")
+            exit()
+        }
+        print("ok, what about in 5 seconds?")
+        sleep(5)
+    }
+}
+
+print("\nwe will now commence the madlibs-ing!")
+
+func display_note(note) {
+    print()
+    if note {
+        print("note: " + note)
+    }
+}
+
+func noun(note) {
+    display_note(note)
+    prompt("enter noun: ")
+}
+
+func verb(note) {
+    display_note(note)
+    prompt("enter verb: ")
+}
+
+func adjective(note) {
+    display_note(note)
+    prompt("enter adjective: ")
+}
+
+func adverb(note) {
+    display_note(note)
+    prompt("enter adverb: ")
+}
+
+madlibs = ""
+madlibs += "Last night, a " + adjective(nil) + " storm swept through " + noun("place")
+madlibs += "\nleaving behind nothing but " + noun("plural") + " and the faint smell of " + noun("abstract")
+
+print("\n===========\nmath break!!\n===========\n")
+
+value = 0
+loop {
+    constant = prompt("please enter your favorite mathematical constant (e or pi): ")
+    value = math[constant]
+    if type(value) != "number" {
+        print("invalid!")
+    } else {
+        break
+    }
+}
+
+function = nil
+function_name = "unknown"
+loop {
+    print("* psst, your options are the functions in:", math)
+    fnname = prompt("please enter your favorite mathematical function: ")
+    function = math[fnname]
+    function_name = fnname
+    if type(function) != "func" {
+        print("invalid!")
+    } else { break }
+}
+
+print("your number was", value)
+print("when put through", function_name, "you get...", function(value))
+
+madlibs += ".\nDespite the chaos, " + name + " decided it was the perfect time to embark"
+madlibs += " on a " + adjective(nil) + " expedition!"
+
+prompt("Done! press enter to view results...")
+print(madlibs)

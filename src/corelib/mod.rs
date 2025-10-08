@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, io::Write, rc::Rc, thread, time::Duration};
+use std::{collections::HashMap, fs, io::Write, process, rc::Rc, thread, time::Duration};
 
 use crate::{executor::{RuntimeError, VM}, fe::ast::Ast, function::NativeFunction, handle::Handle, value::Value};
 
@@ -22,7 +22,7 @@ pub fn print(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
     Ok(Value::Nil)
 }
 
-pub fn input(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
+pub fn prompt(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
     match vals.get(0) {
         Some(i) => {
             print!("{}", i.string()?.borrow());
@@ -33,6 +33,12 @@ pub fn input(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
     let mut s = String::new();
     std::io::stdin().read_line(&mut s).unwrap();
     Ok(s.trim_end().into())
+}
+
+pub fn exit(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
+    process::exit(vals.first()
+        .map(|x| x.num().map(|x| x.round() as i32).unwrap_or(0))
+        .unwrap_or(0));
 }
 
 pub fn corelib_type(_vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -71,7 +77,7 @@ pub fn run(vm: &mut VM, vals: Vec<Value>) -> Result<Value, RuntimeError> {
         Err(e) => {
             println!("encountered errors while running file");
             for e in e {
-                eprintln!("parse error: {}", e.message);
+                e.log(Some(&f));
             }
             return Ok(Value::Bool(false))
         }

@@ -39,7 +39,8 @@ precs!(
     UNARY: 9,
     CALL: 10,
     DOT: 11,
-    PRIMARY: 12
+    INDEX: 12,
+    PRIMARY: 13
 );
 
 impl Token {
@@ -50,12 +51,13 @@ impl Token {
             Mul | Div | Mod => prec::FACTOR,
             Pow => prec::POW,
             Gt | GtEq | Lt | LtEq => prec::COMP,
-            Eq => prec::EQ,
+            Eq | NotEq => prec::EQ,
             And => prec::AND,
             Or => prec::OR,
             Assign | AddEq | SubEq | MulEq | DivEq | PowEq | ModEq => prec::ASSIGN,
             LParen => prec::CALL,
             Dot => prec::DOT,
+            LBracket => prec::INDEX,
             _ => prec::NONE
         }
     }
@@ -65,6 +67,7 @@ impl Token {
             prec::NONE => None,
             prec::CALL => Some(Parser::call),
             prec::DOT => Some(Parser::dot_expr),
+            prec::INDEX => Some(Parser::access_expr),
             prec::ASSIGN => Some(Parser::assign),
             _ => Some(Parser::binary)
         }
@@ -150,8 +153,17 @@ impl Parser {
         ))
     }
 
-    fn access_expr(&mut self) -> Ast {
-        self.error("access syntax unimplemented")
+    fn access_expr(&mut self, lhs: Ast, _prec: u8) -> Ast {
+        let key = self.expression();
+        if !self.pick(&Token::RBracket) {
+            return self.error("expected `]` after expression to close index key");
+        }
+
+        Ast::new(AstNode::Binary(
+            BinOp::Access,
+            lhs,
+            key
+        ))
     }
 
     fn ident(&mut self) -> Ast {
@@ -318,6 +330,7 @@ impl Parser {
             Token::Mod => BinOp::Mod,
             Token::Pow => BinOp::Pow,
             Token::Eq => BinOp::Eq,
+            Token::NotEq => BinOp::NotEq,
             Token::Gt => BinOp::Gt,
             Token::GtEq => BinOp::GtEq,
             Token::Lt => BinOp::Lt,

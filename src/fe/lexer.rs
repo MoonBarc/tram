@@ -29,7 +29,8 @@ impl Lexer {
         let nxt = self.advance();
         self.tok_start = self.at;
         (match nxt {
-            'a'..='z' | 'A'..='Z' | '_' => self.identifier(),
+            // 'a'..='z' | 'A'..='Z' | '_' => self.identifier(),
+            x if x.is_alphabetic() => self.identifier(),
             '0'..='9' => self.number(),
             '-' => if self.pick('>') { Arrow } else { self.eq_or(Sub, SubEq) },
             '=' => self.eq_or(Assign, Eq),
@@ -37,6 +38,7 @@ impl Lexer {
             '<' => self.eq_or(Lt, LtEq),
             '.' => Dot,
             '?' => Question,
+            ':' => Colon,
             '@' => At,
             ',' => Comma,
             ';' => Semicolon,
@@ -115,7 +117,11 @@ impl Lexer {
     fn string(&mut self) -> Token {
         self.eat_through('"');
         let string = self.lexeme();
-        Token::String(string[1..string.len() - 1].to_owned())
+        let string = string[1..string.len() - 1]
+            .replace("\\n", "\n")
+            .replace("\\\\", "\\")
+            .replace("\\t", "\t");
+        Token::String(string)
     }
 
     fn number(&mut self) -> Token {

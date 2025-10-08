@@ -79,7 +79,6 @@ pub struct VM {
 
 enum ExitFlag {
     Continue,
-    Exit,
     Break(Option<String>)
 }
 
@@ -94,7 +93,8 @@ impl VM {
     pub fn register_stdlib(&mut self) {
         let funcs: &[(&str, NativeFunction)] = &[
             ("print", corelib::print),
-            ("input", corelib::input),
+            ("prompt", corelib::prompt),
+            ("exit", corelib::exit),
             ("type", corelib::corelib_type),
             ("run", corelib::run),
             ("sleep", corelib::sleep),
@@ -162,6 +162,7 @@ impl VM {
                     BinOp::Pow => a.num_op(&b, |a, b| Ok(a.powf(b)))?,
                     BinOp::Mod => a.num_op(&b, |a, b| Ok(a % b))?,
                     BinOp::Eq => Value::Bool(a == b),
+                    BinOp::NotEq => Value::Bool(a != b),
                     BinOp::Gt => Value::Bool(a.num()? > b.num()?),
                     BinOp::GtEq => Value::Bool(a.num()? >= b.num()?),
                     BinOp::Lt => Value::Bool(a.num()? < b.num()?),

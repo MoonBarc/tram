@@ -26,9 +26,9 @@ pub fn run(vm: &mut VM) {
         match vm.execute(&prog) {
             Err(e) => println!("== Runtime error from VM: {:?}", e),
             Ok(v) => {
-                println!("{:?}", v)
+                println!("\x1b[36m{:?}\x1b[0m", v)
             }
         }
     }
-    println!("\nkthxbye!")
+    println!("\nbye!")
 }

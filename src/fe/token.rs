@@ -1,5 +1,3 @@
-use crate::fe::{ast::Ast, parse::Parser};
-
 #[derive(PartialEq, Debug)]
 pub enum Token {
     // keywords
@@ -33,6 +31,7 @@ pub enum Token {
     LtEq,
     Dot,
     Question,
+    Colon,
     At,
     Comma,
     Semicolon,
